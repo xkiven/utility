@@ -9,9 +9,9 @@ import (
 type ItemType int
 
 const (
-	TypeText ItemType = iota
-	TypeImage
-	TypeFile
+	TypeText  ItemType = iota // 文本类型
+	TypeImage                 // 图片类型
+	TypeFile                  // 文件类型
 )
 
 // ClipboardItem 表示一个剪贴板历史项
