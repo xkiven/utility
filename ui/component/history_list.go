@@ -204,39 +204,9 @@ func (l *HistoryList) updateItemWidget(i int, o fyne.CanvasObject) {
 		favoriteBtn.OnTapped = func() {
 			if l.onFavorite != nil {
 				itemID := id // 保存当前ID的副本
-				originalIcon := favoriteBtn.Icon
 
-				// 立即更新UI显示，先假设操作会成功
-				if item.IsFavorite {
-					favoriteBtn.SetIcon(theme.ContentAddIcon())
-				} else {
-					favoriteBtn.SetIcon(theme.ConfirmIcon())
-				}
-				favoriteBtn.Refresh()
-
-				// 执行收藏操作
+				// 执行收藏操作（不预先更新UI）
 				l.onFavorite(itemID)
-
-				// 短暂延迟后根据实际结果更新（如果需要）
-				time.AfterFunc(200*time.Millisecond, func() {
-					fyne.Do(func() {
-						// 重新从数据源获取最新状态
-						for _, i := range l.items {
-							if i.ID == itemID {
-								if i.IsFavorite {
-									favoriteBtn.SetIcon(theme.ConfirmIcon())
-								} else {
-									favoriteBtn.SetIcon(theme.ContentAddIcon())
-								}
-								favoriteBtn.Refresh()
-								return
-							}
-						}
-						// 如果未找到，恢复原始图标
-						favoriteBtn.SetIcon(originalIcon)
-						favoriteBtn.Refresh()
-					})
-				})
 			}
 		}
 

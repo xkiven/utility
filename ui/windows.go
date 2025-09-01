@@ -221,8 +221,18 @@ func (w *Window) UpdateHistory(items []*model.ClipboardItem) {
 
 	// 正确分离并更新两个列表
 	favResults, normalResults := splitItemsByFavorite(results)
+
+	// 强制刷新两个列表的全部内容
 	fyne.Do(func() {
+		// 先清空再添加，确保完全刷新
+		w.historyList.UpdateItems([]*model.ClipboardItem{})
+		w.favoriteList.UpdateItems([]*model.ClipboardItem{})
+
 		w.historyList.UpdateItems(normalResults)
 		w.favoriteList.UpdateItems(favResults)
+
+		// 刷新整个内容区域
+		w.contentTabs.Refresh()
+		w.Content().Refresh()
 	})
 }
