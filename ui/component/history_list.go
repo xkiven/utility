@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"image/color"
 	"log"
+	"path/filepath"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -143,19 +144,16 @@ func (l *HistoryList) updateItemWidget(i int, o fyne.CanvasObject) {
 	item := l.items[i]
 	box := o.(*fyne.Container)
 
-	// 确定 itemContainer 和分隔线的位置
+	// 确定 itemContainer 位置（移除未使用的 separator 变量）
 	var itemContainer *fyne.Container
-	var separator fyne.CanvasObject
 
 	// 检查第一个对象的类型
 	if _, isRect := box.Objects[0].(*canvas.Rectangle); isRect {
 		// 有背景矩形的情况
 		itemContainer = box.Objects[1].(*fyne.Container)
-		separator = box.Objects[2]
 	} else {
 		// 没有背景矩形的情况
 		itemContainer = box.Objects[0].(*fyne.Container)
-		separator = box.Objects[1]
 	}
 
 	mainContent := itemContainer.Objects[0].(*fyne.Container)
@@ -179,7 +177,7 @@ func (l *HistoryList) updateItemWidget(i int, o fyne.CanvasObject) {
 		}
 		contentText = content
 	case model.TypeImage:
-		contentText = "[图片内容]"
+		contentText = "[图片内容] " + filepath.Base(item.ImagePath) // 显示图片文件名
 	case model.TypeFile:
 		contentText = "[文件] " + item.Content
 	}
@@ -207,8 +205,6 @@ func (l *HistoryList) updateItemWidget(i int, o fyne.CanvasObject) {
 		favoriteBtn.OnTapped = func() {
 			if l.onFavorite != nil {
 				itemID := id // 保存当前ID的副本
-
-				// 执行收藏操作（不预先更新UI）
 				l.onFavorite(itemID)
 			}
 		}
@@ -236,10 +232,11 @@ func (l *HistoryList) updateItemWidget(i int, o fyne.CanvasObject) {
 			if !hasBackground {
 				// 创建新背景
 				background = canvas.NewRectangle(color.RGBA{R: 255, G: 255, B: 200, A: 100})
+				// 保留分隔线但不使用变量引用
 				box.Objects = []fyne.CanvasObject{
 					background,
 					itemContainer,
-					separator,
+					box.Objects[1], // 分隔线
 				}
 			}
 
@@ -251,13 +248,21 @@ func (l *HistoryList) updateItemWidget(i int, o fyne.CanvasObject) {
 		} else {
 			// 如果不是收藏项，确保没有背景
 			if _, isRect := box.Objects[0].(*canvas.Rectangle); isRect {
-				// 移除背景
+				// 移除背景，保留分隔线
 				box.Objects = []fyne.CanvasObject{
 					itemContainer,
-					separator,
+					box.Objects[2], // 分隔线
 				}
 			}
 		}
+
+		// 强制刷新控件
+		contentLabel.Refresh()
+		timeLabel.Refresh()
+		favoriteBtn.Refresh()
+		deleteBtn.Refresh()
+		itemContainer.Refresh()
+		box.Refresh()
 	})
 }
 
