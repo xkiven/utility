@@ -50,7 +50,13 @@ func NewHistoryList(
 
 	list.OnSelected = func(i widget.ListItemID) {
 		if i >= 0 && i < len(list.items) && list.onSelect != nil {
-			list.onSelect(list.items[i])
+			// 直接使用项目ID对应的实体，而非依赖索引
+			selectedItem := list.items[i]
+			list.onSelect(selectedItem)
+
+			// 取消选中状态
+			fyne.CurrentApp().Driver().CanvasForObject(list).Focus(nil)
+			list.Unselect(i)
 		}
 	}
 
@@ -59,8 +65,29 @@ func NewHistoryList(
 
 // UpdateItems 更新列表项
 func (l *HistoryList) UpdateItems(items []*model.ClipboardItem) {
-	l.items = items
-	l.Refresh()
+	// 关键修改：创建全新的切片，避免引用旧数据
+	newItems := make([]*model.ClipboardItem, 0, len(items))
+	for _, item := range items {
+		// 深度拷贝每个项，确保数据完全隔离
+		newItem := &model.ClipboardItem{
+			ID:         item.ID,
+			Type:       item.Type,
+			Content:    item.Content,
+			ImagePath:  item.ImagePath,
+			IsFavorite: item.IsFavorite,
+			Timestamp:  item.Timestamp,
+		}
+		newItems = append(newItems, newItem)
+	}
+	l.items = newItems
+
+	// 强制UI完全重建列表
+	fyne.Do(func() {
+		l.items = newItems
+		l.Refresh()
+		l.UnselectAll()
+		l.Length = func() int { return len(l.items) }
+	})
 }
 
 // 创建列表项控件
@@ -112,7 +139,22 @@ func (l *HistoryList) updateItemWidget(i int, o fyne.CanvasObject) {
 
 	item := l.items[i]
 	box := o.(*fyne.Container)
-	itemContainer := box.Objects[0].(*fyne.Container)
+
+	// 确定 itemContainer 和分隔线的位置
+	var itemContainer *fyne.Container
+	var separator fyne.CanvasObject
+
+	// 检查第一个对象的类型
+	if _, isRect := box.Objects[0].(*canvas.Rectangle); isRect {
+		// 有背景矩形的情况
+		itemContainer = box.Objects[1].(*fyne.Container)
+		separator = box.Objects[2]
+	} else {
+		// 没有背景矩形的情况
+		itemContainer = box.Objects[0].(*fyne.Container)
+		separator = box.Objects[1]
+	}
+
 	mainContent := itemContainer.Objects[0].(*fyne.Container)
 	buttons := itemContainer.Objects[1].(*fyne.Container)
 
@@ -124,57 +166,126 @@ func (l *HistoryList) updateItemWidget(i int, o fyne.CanvasObject) {
 	favoriteBtn := buttons.Objects[0].(*widget.Button)
 	deleteBtn := buttons.Objects[1].(*widget.Button)
 
-	// 设置内容
+	// 准备内容文本
+	var contentText string
 	switch item.Type {
 	case model.TypeText:
 		content := item.Content
 		if len(content) > 100 {
 			content = content[:100] + "..."
 		}
-		contentLabel.SetText(content)
+		contentText = content
 	case model.TypeImage:
-		contentLabel.SetText("[图片内容]")
+		contentText = "[图片内容]"
 	case model.TypeFile:
-		contentLabel.SetText("[文件] " + item.Content)
+		contentText = "[文件] " + item.Content
 	}
 
-	// 设置时间
-	timeLabel.SetText(formatTime(item.Timestamp))
+	// 准备时间文本
+	timeText := formatTime(item.Timestamp)
 
-	// 设置收藏状态 - 使用通用图标替代
-	if item.IsFavorite {
-		// 已收藏状态使用确认图标
-		favoriteBtn.SetIcon(theme.ConfirmIcon())
-	} else {
-		// 未收藏状态使用添加图标
-		favoriteBtn.SetIcon(theme.ContentAddIcon())
-	}
+	// 使用 fyne.Do 确保在主线程执行 UI 操作
+	fyne.Do(func() {
+		// 设置内容
+		contentLabel.SetText(contentText)
 
-	// 设置按钮点击事件
-	id := item.ID
-	favoriteBtn.OnTapped = func() {
-		if l.onFavorite != nil {
-			l.onFavorite(id)
+		// 设置时间
+		timeLabel.SetText(timeText)
+
+		// 设置收藏状态
+		if item.IsFavorite {
+			favoriteBtn.SetIcon(theme.ConfirmIcon())
+		} else {
+			favoriteBtn.SetIcon(theme.ContentAddIcon())
 		}
-	}
 
-	deleteBtn.OnTapped = func() {
-		if l.onDelete != nil {
-			l.onDelete(id)
-		}
-	}
+		// 设置按钮点击事件
+		id := item.ID
+		favoriteBtn.OnTapped = func() {
+			if l.onFavorite != nil {
+				itemID := id // 保存当前ID的副本
+				originalIcon := favoriteBtn.Icon
 
-	// 收藏项高亮显示
-	if item.IsFavorite {
-		background := canvas.NewRectangle(color.RGBA{R: 255, G: 255, B: 200, A: 100})
-		box.Objects = []fyne.CanvasObject{
-			background,
-			itemContainer,
-			box.Objects[1], // 分隔线
+				// 立即更新UI显示，先假设操作会成功
+				if item.IsFavorite {
+					favoriteBtn.SetIcon(theme.ContentAddIcon())
+				} else {
+					favoriteBtn.SetIcon(theme.ConfirmIcon())
+				}
+				favoriteBtn.Refresh()
+
+				// 执行收藏操作
+				l.onFavorite(itemID)
+
+				// 短暂延迟后根据实际结果更新（如果需要）
+				time.AfterFunc(200*time.Millisecond, func() {
+					fyne.Do(func() {
+						// 重新从数据源获取最新状态
+						for _, i := range l.items {
+							if i.ID == itemID {
+								if i.IsFavorite {
+									favoriteBtn.SetIcon(theme.ConfirmIcon())
+								} else {
+									favoriteBtn.SetIcon(theme.ContentAddIcon())
+								}
+								favoriteBtn.Refresh()
+								return
+							}
+						}
+						// 如果未找到，恢复原始图标
+						favoriteBtn.SetIcon(originalIcon)
+						favoriteBtn.Refresh()
+					})
+				})
+			}
 		}
-		background.Move(fyne.NewPos(0, 0))
-		background.Resize(box.Size())
-	}
+
+		deleteBtn.OnTapped = func() {
+			if l.onDelete != nil {
+				// 使用当前item的ID副本
+				itemID := id
+				l.onDelete(itemID)
+			}
+		}
+
+		// 收藏项高亮显示
+		if item.IsFavorite {
+			// 检查是否已经有背景
+			var background *canvas.Rectangle
+			var hasBackground bool
+
+			// 检查第一个对象是否是背景矩形
+			if rect, isRect := box.Objects[0].(*canvas.Rectangle); isRect {
+				background = rect
+				hasBackground = true
+			}
+
+			if !hasBackground {
+				// 创建新背景
+				background = canvas.NewRectangle(color.RGBA{R: 255, G: 255, B: 200, A: 100})
+				box.Objects = []fyne.CanvasObject{
+					background,
+					itemContainer,
+					separator,
+				}
+			}
+
+			// 更新背景位置和大小
+			background.Move(fyne.NewPos(0, 0))
+			background.Resize(box.Size())
+			background.FillColor = color.RGBA{R: 255, G: 255, B: 200, A: 100}
+			background.Refresh()
+		} else {
+			// 如果不是收藏项，确保没有背景
+			if _, isRect := box.Objects[0].(*canvas.Rectangle); isRect {
+				// 移除背景
+				box.Objects = []fyne.CanvasObject{
+					itemContainer,
+					separator,
+				}
+			}
+		}
+	})
 }
 
 // 格式化时间显示

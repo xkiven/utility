@@ -71,8 +71,8 @@ func (s *MySQLStorage) SaveItems(items []*model.ClipboardItem) error {
 func (s *MySQLStorage) LoadItems() ([]*model.ClipboardItem, error) {
 	var items []*model.ClipboardItem
 
-	// 查询并按收藏状态和时间排序
-	result := s.db.Order("is_favorite DESC, timestamp DESC").
+	// 只按时间降序排序
+	result := s.db.Order("timestamp DESC").
 		Limit(s.config.MaxItems).
 		Find(&items)
 
@@ -176,6 +176,11 @@ func (s *MySQLStorage) ToggleFavorite(id string) ([]*model.ClipboardItem, error)
 
 	if result.Error != nil {
 		return nil, result.Error
+	}
+
+	// 检查是否有记录被更新
+	if result.RowsAffected == 0 {
+		return nil, fmt.Errorf("未找到ID为 %s 的项或未发生变化", id)
 	}
 
 	// 返回更新后的列表

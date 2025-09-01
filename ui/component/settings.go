@@ -2,210 +2,202 @@ package component
 
 import (
 	"clipboard/config"
+	"errors"
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
 	"os"
+	"path/filepath"
 	"strconv"
 )
 
-// SettingsPanel 设置面板组件
+// SettingsPanel 应用设置面板
 type SettingsPanel struct {
-	*container.Scroll
+	*fyne.Container
+	window          fyne.Window
 	storageType     *widget.Select
 	maxItemsEntry   *widget.Entry
-	mysqlHostEntry  *widget.Entry
-	mysqlPortEntry  *widget.Entry
-	mysqlUserEntry  *widget.Entry
-	mysqlPassEntry  *widget.Entry
-	mysqlDBEntry    *widget.Entry
-	jsonPathEntry   *widget.Entry
 	customPathCheck *widget.Check
+	jsonPathEntry   *widget.Entry
+	browseBtn       *widget.Button
+	saveBtn         *widget.Button
+	mysqlSettings   *fyne.Container // MySQL设置容器
+	jsonSettings    *fyne.Container // JSON设置容器
 	saveCallback    func(*config.StorageConfig)
-	mysqlSettings   *fyne.Container
-	jsonSettings    *fyne.Container
-	window          fyne.Window
 }
 
 // NewSettingsPanel 创建设置面板
 func NewSettingsPanel(window fyne.Window, cfg *config.StorageConfig, saveCallback func(*config.StorageConfig)) *SettingsPanel {
-	panel := &SettingsPanel{
-		saveCallback: saveCallback,
+	p := &SettingsPanel{
 		window:       window,
+		saveCallback: saveCallback,
 	}
 
-	// 存储类型选择
-	panel.storageType = widget.NewSelect(
+	// 初始化存储类型选择器
+	p.storageType = widget.NewSelect(
 		[]string{string(config.StorageTypeJSON), string(config.StorageTypeMySQL)},
-		func(value string) {
-			panel.updateStorageSettingsVisibility(value)
-		},
+		nil, // 先不设置回调，后面再设置
 	)
-	panel.storageType.SetSelected(string(cfg.Type))
 
-	// 最大项目数
-	panel.maxItemsEntry = widget.NewEntry()
-	panel.maxItemsEntry.SetText(strconv.Itoa(cfg.MaxItems))
+	// 初始化最大项目数输入框
+	p.maxItemsEntry = widget.NewEntry()
+	p.maxItemsEntry.SetText(strconv.Itoa(cfg.MaxItems))
 
-	// JSON路径设置
-	panel.customPathCheck = widget.NewCheck("使用自定义存储路径", func(checked bool) {
-		// 当勾选时启用路径输入框，否则禁用
-		panel.jsonPathEntry.Disable()
+	// 初始化JSON存储相关控件
+	p.customPathCheck = widget.NewCheck("使用自定义路径", func(checked bool) {
+		p.jsonPathEntry.Disable()
+		p.browseBtn.Disable()
 		if checked {
-			panel.jsonPathEntry.Enable()
+			p.jsonPathEntry.Enable()
+			p.browseBtn.Enable()
 		}
 	})
-	panel.customPathCheck.SetChecked(cfg.CustomPath)
+	p.customPathCheck.SetChecked(cfg.CustomPath)
 
-	panel.jsonPathEntry = widget.NewEntry()
-	panel.jsonPathEntry.SetText(cfg.JSONPath)
-	if !cfg.CustomPath {
-		panel.jsonPathEntry.Disable()
-	}
+	p.jsonPathEntry = widget.NewEntry()
+	p.jsonPathEntry.SetText(cfg.JSONPath)
 
-	browseBtn := widget.NewButton("浏览...", func() {
+	p.browseBtn = widget.NewButton("浏览...", func() {
 		dialog.ShowFolderOpen(func(dir fyne.ListableURI, err error) {
 			if err != nil {
-				dialog.ShowError(err, panel.window)
+				dialog.ShowError(err, p.window)
 				return
 			}
 			if dir != nil {
-				panel.jsonPathEntry.SetText(dir.Path()) // 选择后更新路径
+				p.jsonPathEntry.SetText(dir.Path())
 			}
-		}, panel.window)
+		}, p.window)
 	})
 
-	panel.jsonSettings = container.NewVBox(
-		panel.customPathCheck,
-		container.NewBorder(
-			nil, nil, nil, browseBtn,
-			panel.jsonPathEntry,
+	// 创建JSON设置容器
+	p.jsonSettings = container.NewVBox(
+		container.NewHBox(p.customPathCheck),
+		container.NewHBox(
+			widget.NewLabel("存储路径:"),
+			p.jsonPathEntry,
+			p.browseBtn,
 		),
 	)
 
-	// MySQL设置
-	panel.mysqlHostEntry = widget.NewEntry()
-	panel.mysqlHostEntry.SetText(cfg.MySQL.Host)
+	// 初始化MySQL设置控件
+	mysqlHostEntry := widget.NewEntry()
+	mysqlHostEntry.SetText(cfg.MySQL.Host)
 
-	panel.mysqlPortEntry = widget.NewEntry()
-	panel.mysqlPortEntry.SetText(strconv.Itoa(cfg.MySQL.Port))
+	mysqlPortEntry := widget.NewEntry()
+	mysqlPortEntry.SetText(strconv.Itoa(cfg.MySQL.Port))
 
-	panel.mysqlUserEntry = widget.NewEntry()
-	panel.mysqlUserEntry.SetText(cfg.MySQL.User)
+	mysqlUserEntry := widget.NewEntry()
+	mysqlUserEntry.SetText(cfg.MySQL.User)
 
-	panel.mysqlPassEntry = widget.NewEntry()
-	panel.mysqlPassEntry.SetText(cfg.MySQL.Password)
-	panel.mysqlPassEntry.Password = true
+	mysqlPassEntry := widget.NewPasswordEntry()
+	mysqlPassEntry.SetText(cfg.MySQL.Password)
 
-	panel.mysqlDBEntry = widget.NewEntry()
-	panel.mysqlDBEntry.SetText(cfg.MySQL.Database)
+	mysqlDBEntry := widget.NewEntry()
+	mysqlDBEntry.SetText(cfg.MySQL.Database)
 
-	// MySQL设置容器
-	panel.mysqlSettings = container.NewVBox(
-		widget.NewLabel("MySQL 主机:"),
-		panel.mysqlHostEntry,
-		widget.NewLabel("MySQL 端口:"),
-		panel.mysqlPortEntry,
-		widget.NewLabel("MySQL 用户名:"),
-		panel.mysqlUserEntry,
-		widget.NewLabel("MySQL 密码:"),
-		panel.mysqlPassEntry,
-		widget.NewLabel("MySQL 数据库:"),
-		panel.mysqlDBEntry,
+	// 创建MySQL设置容器
+	p.mysqlSettings = container.NewVBox(
+		container.NewHBox(widget.NewLabel("主机:"), mysqlHostEntry),
+		container.NewHBox(widget.NewLabel("端口:"), mysqlPortEntry),
+		container.NewHBox(widget.NewLabel("用户名:"), mysqlUserEntry),
+		container.NewHBox(widget.NewLabel("密码:"), mysqlPassEntry),
+		container.NewHBox(widget.NewLabel("数据库:"), mysqlDBEntry),
 	)
 
-	// 测试连接按钮
-	testMysqlBtn := widget.NewButton("测试连接", func() {
-		// 这里可以添加测试MySQL连接的逻辑
-		dialog.ShowInformation("测试结果", "连接测试功能尚未实现", panel.window)
-	})
-	panel.mysqlSettings.Add(testMysqlBtn)
-
-	// 保存按钮
-	saveBtn := widget.NewButton("保存设置", func() {
-		panel.saveSettings()
-	})
-
-	// 组装面板
-	content := container.NewVBox(
-		widget.NewLabel("存储类型:"),
-		panel.storageType,
-		widget.NewLabel("最大历史记录数:"),
-		panel.maxItemsEntry,
-		widget.NewSeparator(),
-		widget.NewLabel("JSON 存储设置:"),
-		panel.jsonSettings,
-		widget.NewSeparator(),
-		widget.NewLabel("MySQL 设置:"),
-		panel.mysqlSettings,
-		saveBtn,
-	)
-
-	// 初始显示正确的存储设置
-	panel.updateStorageSettingsVisibility(string(cfg.Type))
-
-	panel.Scroll = container.NewScroll(content)
-	return panel
-}
-
-// 更新存储设置可见性
-func (p *SettingsPanel) updateStorageSettingsVisibility(storageType string) {
-	if storageType == string(config.StorageTypeMySQL) {
-		p.mysqlSettings.Show()
-		p.jsonSettings.Hide()
-	} else {
-		p.mysqlSettings.Hide()
-		p.jsonSettings.Show()
-	}
-}
-
-// 保存设置
-func (p *SettingsPanel) saveSettings() {
-	if p.saveCallback == nil {
-		return
-	}
-
-	// 解析最大项目数
-	maxItems, err := strconv.Atoi(p.maxItemsEntry.Text)
-	if err != nil || maxItems <= 0 {
-		maxItems = 100
-	}
-
-	// 解析端口
-	port, err := strconv.Atoi(p.mysqlPortEntry.Text)
-	if err != nil || port <= 0 {
-		port = 3306
-	}
-
-	// 验证JSON路径
-	jsonPath := p.jsonPathEntry.Text
-	if p.customPathCheck.Checked && jsonPath != "" {
-		// 确保目录存在
-		if err := os.MkdirAll(jsonPath, 0755); err != nil {
-			dialog.ShowError(err, p.window)
-			return
+	// 设置保存按钮
+	p.saveBtn = widget.NewButton("保存设置", func() {
+		// 解析最大项目数
+		maxItems, err := strconv.Atoi(p.maxItemsEntry.Text)
+		if err != nil || maxItems <= 0 {
+			maxItems = 100
 		}
+
+		// 解析端口
+		port, err := strconv.Atoi(mysqlPortEntry.Text)
+		if err != nil || port <= 0 || port > 65535 {
+			port = 3306
+		}
+
+		// 验证并处理JSON路径
+		jsonPath := p.jsonPathEntry.Text
+		if p.customPathCheck.Checked && jsonPath != "" {
+			// 确保目录存在
+			if err := os.MkdirAll(jsonPath, 0755); err != nil {
+				dialog.ShowError(errors.New("无法创建JSON存储目录: "+err.Error()), p.window)
+				return
+			}
+		} else if !p.customPathCheck.Checked {
+			// 使用默认路径
+			appDataDir, _ := os.UserConfigDir()
+			jsonPath = filepath.Join(appDataDir, "clipboard-manager", "history")
+			os.MkdirAll(jsonPath, 0755)
+		}
+
+		// 创建配置对象
+		newCfg := &config.StorageConfig{
+			Type:       config.StorageType(p.storageType.Selected),
+			JSONPath:   jsonPath,
+			CustomPath: p.customPathCheck.Checked,
+			MySQL: config.MySQLConfig{
+				Host:     mysqlHostEntry.Text,
+				Port:     port,
+				User:     mysqlUserEntry.Text,
+				Password: mysqlPassEntry.Text,
+				Database: mysqlDBEntry.Text,
+			},
+			MaxItems: maxItems,
+		}
+
+		// 调用回调保存配置
+		if p.saveCallback != nil {
+			p.saveCallback(newCfg)
+		}
+
+		// 显示保存成功提示
+		dialog.ShowInformation("设置已保存", "您的设置已成功保存", p.window)
+	})
+
+	// 设置存储类型变更回调（在所有控件初始化完成后）
+	p.storageType.OnChanged = func(value string) {
+		p.updateStorageSettingsVisibility(value)
 	}
 
-	// 创建配置对象
-	cfg := &config.StorageConfig{
-		Type:       config.StorageType(p.storageType.Selected),
-		JSONPath:   jsonPath,
-		CustomPath: p.customPathCheck.Checked,
-		MySQL: config.MySQLConfig{
-			Host:     p.mysqlHostEntry.Text,
-			Port:     port,
-			User:     p.mysqlUserEntry.Text,
-			Password: p.mysqlPassEntry.Text,
-			Database: p.mysqlDBEntry.Text,
-		},
-		MaxItems: maxItems,
+	// 设置初始选中值
+	p.storageType.SetSelected(string(cfg.Type))
+	// 确保初始显示正确的设置面板
+	p.updateStorageSettingsVisibility(string(cfg.Type))
+
+	// 构建主容器
+	p.Container = container.NewVBox(
+		widget.NewLabel("存储类型:"),
+		p.storageType,
+		widget.NewSeparator(),
+		widget.NewLabel("最大历史项目数:"),
+		p.maxItemsEntry,
+		widget.NewSeparator(),
+		widget.NewLabel("存储设置:"),
+		// 这里将根据存储类型显示不同的设置面板
+		container.NewVBox(p.jsonSettings, p.mysqlSettings),
+		layout.NewSpacer(),
+		p.saveBtn,
+	)
+
+	return p
+}
+
+// updateStorageSettingsVisibility 根据存储类型更新设置面板可见性
+func (p *SettingsPanel) updateStorageSettingsVisibility(storageType string) {
+	if p.jsonSettings == nil || p.mysqlSettings == nil {
+		return // 防止未初始化时调用
 	}
 
-	// 调用回调保存配置
-	p.saveCallback(cfg)
-
-	// 显示保存成功提示
-	dialog.ShowInformation("设置已保存", "您的设置已成功保存", p.window)
+	if storageType == string(config.StorageTypeJSON) {
+		p.jsonSettings.Show()
+		p.mysqlSettings.Hide()
+	} else if storageType == string(config.StorageTypeMySQL) {
+		p.jsonSettings.Hide()
+		p.mysqlSettings.Show()
+	}
 }

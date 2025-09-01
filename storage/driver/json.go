@@ -4,10 +4,12 @@ import (
 	"clipboard/config"
 	"clipboard/model"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 )
 
 // JSONStorage JSON文件存储实现
@@ -15,6 +17,7 @@ type JSONStorage struct {
 	config    *config.StorageConfig
 	filePath  string
 	imagePath string
+	mu        sync.Mutex
 }
 
 // NewJSONStorage 创建JSON存储实例
@@ -82,14 +85,9 @@ func (s *JSONStorage) LoadItems() ([]*model.ClipboardItem, error) {
 		return nil, err
 	}
 
-	// 排序：收藏项在前，按时间降序
+	// 排序
+	// 只按时间降序排序（最新的在前）
 	sort.Slice(items, func(i, j int) bool {
-		if items[i].IsFavorite && !items[j].IsFavorite {
-			return true
-		}
-		if !items[i].IsFavorite && items[j].IsFavorite {
-			return false
-		}
 		return items[i].Timestamp.After(items[j].Timestamp)
 	})
 
@@ -129,29 +127,41 @@ func (s *JSONStorage) AddItem(newItem *model.ClipboardItem) ([]*model.ClipboardI
 
 // DeleteItem 删除项
 func (s *JSONStorage) DeleteItem(id string) ([]*model.ClipboardItem, error) {
+	// 先锁定文件，避免并发问题
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	items, err := s.LoadItems()
 	if err != nil {
 		return nil, err
 	}
 
-	// 查找并删除
-	for i, item := range items {
+	newItems := make([]*model.ClipboardItem, 0, len(items)-1)
+	found := false
+	for _, item := range items {
 		if item.ID == id {
-			// 如果是图片，删除文件
+			found = true
+			// 处理图片文件删除
 			if item.Type == model.TypeImage && item.ImagePath != "" {
 				os.Remove(item.ImagePath)
 			}
-
-			items = append(items[:i], items[i+1:]...)
-			break
+			continue
 		}
+		newItems = append(newItems, item)
 	}
 
-	if err := s.SaveItems(items); err != nil {
+	// 确保确实删除了项目
+	if !found {
+		return nil, fmt.Errorf("未找到ID为 %s 的项", id)
+	}
+
+	// 立即保存并返回最新数据
+	if err := s.SaveItems(newItems); err != nil {
 		return nil, err
 	}
 
-	return items, nil
+	// 关键：直接返回新列表，不重新加载
+	return newItems, nil
 }
 
 // ToggleFavorite 切换收藏状态
@@ -161,17 +171,33 @@ func (s *JSONStorage) ToggleFavorite(id string) ([]*model.ClipboardItem, error) 
 		return nil, err
 	}
 
+	found := false
 	for _, item := range items {
 		if item.ID == id {
 			item.IsFavorite = !item.IsFavorite
+			found = true
 			break
 		}
+	}
+
+	// 确保找到了要更新的项
+	if !found {
+		return nil, fmt.Errorf("未找到ID为 %s 的项", id)
 	}
 
 	if err := s.SaveItems(items); err != nil {
 		return nil, err
 	}
 
+	// 重新排序 - 先按收藏状态，再按时间
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].IsFavorite == items[j].IsFavorite {
+			return items[i].Timestamp.After(items[j].Timestamp)
+		}
+		return items[i].IsFavorite
+	})
+
+	// 直接返回排序后的结果，而不是重新加载
 	return items, nil
 }
 

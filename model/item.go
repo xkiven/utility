@@ -1,7 +1,9 @@
 package model
 
 import (
+	"fmt"
 	"gorm.io/gorm"
+	"math/rand"
 	"time"
 )
 
@@ -41,5 +43,7 @@ func NewClipboardItem(itemType ItemType, content, imagePath string) *ClipboardIt
 
 // 生成唯一ID
 func generateID() string {
-	return time.Now().Format("20060102150405000000")
+	// 精确到微秒 + 3位随机数，避免并发冲突
+	return time.Now().Format("20060102150405000000") +
+		fmt.Sprintf("%03d", rand.Intn(1000))
 }

@@ -1,6 +1,7 @@
 package component
 
 import (
+	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/widget"
 )
 
@@ -26,6 +27,9 @@ func NewSearchBar(onSearch func(string)) *SearchBar {
 // 处理搜索
 func (s *SearchBar) handleSearch(text string) {
 	if s.onSearch != nil {
-		s.onSearch(text)
+		// 确保在UI线程中执行搜索
+		fyne.Do(func() {
+			s.onSearch(text)
+		})
 	}
 }
