@@ -5,6 +5,7 @@ import (
 	"clipboard/model"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -166,8 +167,10 @@ func (s *JSONStorage) DeleteItem(id string) ([]*model.ClipboardItem, error) {
 
 // ToggleFavorite 切换收藏状态
 func (s *JSONStorage) ToggleFavorite(id string) ([]*model.ClipboardItem, error) {
+	log.Printf("切换收藏状态，ID: %s", id)
 	items, err := s.LoadItems()
 	if err != nil {
+		log.Printf("加载项失败: %v", err)
 		return nil, err
 	}
 
@@ -182,10 +185,12 @@ func (s *JSONStorage) ToggleFavorite(id string) ([]*model.ClipboardItem, error) 
 
 	// 确保找到了要更新的项
 	if !found {
+		log.Printf("未找到要切换收藏状态的项，ID: %s", id)
 		return nil, fmt.Errorf("未找到ID为 %s 的项", id)
 	}
 
 	if err := s.SaveItems(items); err != nil {
+		log.Printf("保存收藏状态失败: %v", err)
 		return nil, err
 	}
 

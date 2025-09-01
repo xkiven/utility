@@ -4,6 +4,7 @@ import (
 	"clipboard/model"
 	"fmt"
 	"image/color"
+	"log"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -65,6 +66,7 @@ func NewHistoryList(
 
 // UpdateItems 更新列表项
 func (l *HistoryList) UpdateItems(items []*model.ClipboardItem) {
+	log.Printf("更新列表项，接收数据量: %d", len(items))
 	// 关键修改：创建全新的切片，避免引用旧数据
 	newItems := make([]*model.ClipboardItem, 0, len(items))
 	for _, item := range items {
@@ -87,6 +89,7 @@ func (l *HistoryList) UpdateItems(items []*model.ClipboardItem) {
 		l.Refresh()
 		l.UnselectAll()
 		l.Length = func() int { return len(l.items) }
+		log.Printf("列表UI已更新，显示数量: %d", len(l.items))
 	})
 }
 

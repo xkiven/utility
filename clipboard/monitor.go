@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/atotto/clipboard"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -112,12 +113,14 @@ func (m *Monitor) checkClipboard() {
 	// 先获取剪贴板文本内容
 	text, err := clipboard.ReadAll()
 	if err != nil {
+		log.Printf("读取剪贴板文本失败: %v", err)
 		return
 	}
 
 	// 检查是否为文件路径
 	isFile, fileList := m.checkFilePaths(text)
 	if isFile && fileList != m.lastFileList {
+		log.Printf("检测到文件变化: %s", fileList)
 		m.handleFileChange(fileList)
 		return
 	}
@@ -125,12 +128,14 @@ func (m *Monitor) checkClipboard() {
 	// 检查图片
 	isImage, imageID, err := m.processor.CheckImage()
 	if err == nil && isImage && imageID != m.lastImageID {
+		log.Printf("检测到图片变化，ID: %s", imageID)
 		m.handleImageChange(imageID)
 		return
 	}
 
 	// 检查文本（排除文件情况）
 	if text != "" && text != m.lastText && !isFile {
+		log.Printf("检测到文本变化: %s", text)
 		m.handleTextChange(text)
 		return
 	}

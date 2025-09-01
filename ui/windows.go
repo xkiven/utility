@@ -205,6 +205,8 @@ func (w *Window) UpdateHistory(items []*model.ClipboardItem) {
 	currentSearch := w.searchBar.Text
 	var results []*model.ClipboardItem
 
+	log.Printf("开始更新历史记录，原始数据量: %d，搜索关键词: %s", len(items), currentSearch)
+
 	if currentSearch != "" {
 		// 执行搜索过滤
 		keyword := strings.ToLower(currentSearch)
@@ -215,12 +217,15 @@ func (w *Window) UpdateHistory(items []*model.ClipboardItem) {
 				results = append(results, item)
 			}
 		}
+		log.Printf("搜索完成，匹配结果: %d 条", len(results))
 	} else {
 		results = items
+		log.Printf("无搜索关键词，使用全部数据: %d 条", len(results))
 	}
 
 	// 正确分离并更新两个列表
 	favResults, normalResults := splitItemsByFavorite(results)
+	log.Printf("分离收藏项: %d 条，普通项: %d 条", len(favResults), len(normalResults))
 
 	// 强制刷新两个列表的全部内容
 	fyne.Do(func() {
@@ -234,5 +239,6 @@ func (w *Window) UpdateHistory(items []*model.ClipboardItem) {
 		// 刷新整个内容区域
 		w.contentTabs.Refresh()
 		w.Content().Refresh()
+		log.Println("UI列表已刷新")
 	})
 }
