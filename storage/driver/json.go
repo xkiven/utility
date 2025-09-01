@@ -191,10 +191,7 @@ func (s *JSONStorage) ToggleFavorite(id string) ([]*model.ClipboardItem, error) 
 
 	// 重新排序 - 先按收藏状态，再按时间
 	sort.Slice(items, func(i, j int) bool {
-		if items[i].IsFavorite == items[j].IsFavorite {
-			return items[i].Timestamp.After(items[j].Timestamp)
-		}
-		return items[i].IsFavorite
+		return items[i].Timestamp.After(items[j].Timestamp)
 	})
 
 	// 直接返回排序后的结果，而不是重新加载

@@ -96,27 +96,28 @@ func (w *Window) initUI() {
 				fav, normal := splitItemsByFavorite(updatedItems)
 				w.historyList.UpdateItems(normal) // 全量刷新普通列表
 				w.favoriteList.UpdateItems(fav)   // 全量刷新收藏列表
+				// 强制UI刷新
+				w.historyList.Refresh()
+				w.favoriteList.Refresh()
 			}
 		},
 		func(id string) {
-			// 删除项后全量刷新两个列表
 			updatedItems, err := w.storage.DeleteItem(id)
 			if err == nil {
 				fav, normal := splitItemsByFavorite(updatedItems)
 
-				// 先更新数据源，再强制刷新UI
+				// 强制刷新两个列表，确保删除后UI一致
 				w.favoriteList.UpdateItems(fav)
 				w.historyList.UpdateItems(normal)
 
-				// 额外添加：如果收藏列表为空，给用户提示
+				// 修复空收藏列表提示（仅在收藏列表为空时显示）
 				if len(fav) == 0 {
-					w.favoriteList.UpdateItems([]*model.ClipboardItem{
-						{
-							ID:      "empty",
-							Type:    model.TypeText,
-							Content: "暂无收藏内容",
-						},
-					})
+					w.favoriteList.UpdateItems([]*model.ClipboardItem{{
+						ID:         "empty-favorite",
+						Type:       model.TypeText,
+						Content:    "暂无收藏内容",
+						IsFavorite: false,
+					}})
 				}
 			} else {
 				log.Printf("删除失败: %v", err)
@@ -135,8 +136,9 @@ func (w *Window) initUI() {
 			updatedItems, err := w.storage.ToggleFavorite(id)
 			if err == nil {
 				fav, normal := splitItemsByFavorite(updatedItems)
-				w.historyList.UpdateItems(normal) // 全量刷新普通列表
-				w.favoriteList.UpdateItems(fav)   // 全量刷新收藏列表
+				// 同时更新两个列表，保持状态一致
+				w.favoriteList.UpdateItems(fav)
+				w.historyList.UpdateItems(normal)
 			}
 		},
 		func(id string) {
@@ -146,6 +148,9 @@ func (w *Window) initUI() {
 				fav, normal := splitItemsByFavorite(updatedItems)
 				w.historyList.UpdateItems(normal)
 				w.favoriteList.UpdateItems(fav)
+				// 强制UI刷新
+				w.historyList.Refresh()
+				w.favoriteList.Refresh()
 			}
 		},
 	)
@@ -180,16 +185,16 @@ func (w *Window) initUI() {
 
 // 辅助函数：分离收藏项和普通项
 func splitItemsByFavorite(items []*model.ClipboardItem) (favorites, normal []*model.ClipboardItem) {
-	// 先按时间排序，确保最新的在前面
+	// 按时间降序排序（最新在前）
 	sort.Slice(items, func(i, j int) bool {
 		return items[i].Timestamp.After(items[j].Timestamp)
 	})
 
 	for _, item := range items {
 		if item.IsFavorite {
-			favorites = append(favorites, item)
+			favorites = append(favorites, item) // 收藏列表：只包含收藏项
 		}
-		// 普通列表包含所有项（包括收藏项）
+		// 关键修改：普通列表保留所有项（包括已收藏的）
 		normal = append(normal, item)
 	}
 	return
@@ -198,29 +203,23 @@ func splitItemsByFavorite(items []*model.ClipboardItem) (favorites, normal []*mo
 // UpdateHistory 更新历史记录列表
 func (w *Window) UpdateHistory(items []*model.ClipboardItem) {
 	currentSearch := w.searchBar.Text
-	if currentSearch == "" {
-		// 同时更新两个列表，收藏项会同时出现在两个列表中
-		fav, normal := splitItemsByFavorite(items)
-		w.historyList.UpdateItems(normal)
-		w.favoriteList.UpdateItems(fav)
-		return
-	}
-
-	// 执行搜索时过滤内容
 	var results []*model.ClipboardItem
-	keyword := strings.ToLower(currentSearch)
-	for _, item := range items {
-		if strings.Contains(strings.ToLower(item.Content), keyword) {
-			results = append(results, item)
-			continue
+
+	if currentSearch != "" {
+		// 执行搜索过滤
+		keyword := strings.ToLower(currentSearch)
+		for _, item := range items {
+			if strings.Contains(strings.ToLower(item.Content), keyword) ||
+				(item.Type == model.TypeImage && strings.Contains(keyword, "图片")) ||
+				(item.Type == model.TypeFile && strings.Contains(keyword, "文件")) {
+				results = append(results, item)
+			}
 		}
-		if (item.Type == model.TypeImage && strings.Contains(keyword, "图片")) ||
-			(item.Type == model.TypeFile && strings.Contains(keyword, "文件")) {
-			results = append(results, item)
-		}
+	} else {
+		results = items
 	}
 
-	// 搜索结果也应用相同的显示规则
+	// 正确分离并更新两个列表
 	favResults, normalResults := splitItemsByFavorite(results)
 	fyne.Do(func() {
 		w.historyList.UpdateItems(normalResults)
