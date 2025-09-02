@@ -84,15 +84,20 @@ func (w *Window) rebuildFullUI() {
 
 	// 4. 重建搜索框（新实例）
 	currentSearch := ""
-	if w.searchBar != nil { // 保留搜索状态
+	if w.searchBar != nil {
 		currentSearch = w.searchBar.Text
 	}
 	w.searchBar = component.NewSearchBar(func(text string) {
-		// 搜索回调内触发全量重建
 		w.UpdateHistory(nil)
 	})
-	w.searchBar.SetText(currentSearch) // 恢复搜索状态
+	w.searchBar.SetText(currentSearch)
 
+	// 新增：主动将焦点设置到搜索框
+	fyne.Do(func() {
+		if canvas := fyne.CurrentApp().Driver().CanvasForObject(w.searchBar); canvas != nil {
+			canvas.Focus(w.searchBar) // 强制让搜索框获取焦点
+		}
+	})
 	// 5. 重建普通历史列表（新实例+重新绑定回调）
 	w.historyList = component.NewHistoryList(
 		normalItems,

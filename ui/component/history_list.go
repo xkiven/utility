@@ -55,8 +55,16 @@ func NewHistoryList(
 			selectedItem := list.items[i]
 			list.onSelect(selectedItem)
 			// 取消选中状态
-			fyne.CurrentApp().Driver().CanvasForObject(list).Focus(nil)
-			list.Unselect(i)
+			fyne.Do(func() {
+				// 1. 取消列表项选中状态
+				list.Unselect(i)
+				// 2. 清除画布焦点（彻底移除选中高亮）
+				if canvas := fyne.CurrentApp().Driver().CanvasForObject(list); canvas != nil {
+					canvas.Focus(nil)
+				}
+				// 3. 强制刷新列表项（确保高亮样式立即更新）
+				list.RefreshItem(i)
+			})
 		}
 	}
 
