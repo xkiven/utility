@@ -5,7 +5,7 @@ import (
 	"clipboard/storage"
 	"errors"
 	"fmt"
-	"github.com/atotto/clipboard"
+	"golang.design/x/clipboard"
 	"log"
 	"os"
 	"path/filepath"
@@ -94,15 +94,18 @@ func (m *Monitor) SetContent(item *model.ClipboardItem) error {
 
 	switch item.Type {
 	case model.TypeText:
-		return clipboard.WriteAll(item.Content)
+		clipboard.Write(clipboard.FmtText, []byte(item.Content))
+		return nil
 	case model.TypeImage:
 		if item.ImagePath == "" {
 			return errors.New("图片路径为空")
 		}
-		return m.processor.SetImageToClipboard(item.ImagePath)
+		// 新增日志：确认传递的图片路径
+		log.Printf("准备复制图片，路径：%s", item.ImagePath)
+		return m.processor.SetImageToClipboard(item.ImagePath) // 确保路径是绝对路径
 	case model.TypeFile:
-		// 对于文件，直接写入路径字符串
-		return clipboard.WriteAll(item.Content)
+		clipboard.Write(clipboard.FmtText, []byte(item.Content))
+		return nil
 	default:
 		return errors.New("不支持的内容类型")
 	}
@@ -110,22 +113,7 @@ func (m *Monitor) SetContent(item *model.ClipboardItem) error {
 
 // checkClipboard 检查剪贴板变化
 func (m *Monitor) checkClipboard() {
-	// 先获取剪贴板文本内容
-	text, err := clipboard.ReadAll()
-	if err != nil {
-		log.Printf("读取剪贴板文本失败: %v", err)
-		return
-	}
-
-	// 检查是否为文件路径
-	isFile, fileList := m.checkFilePaths(text)
-	if isFile && fileList != m.lastFileList {
-		log.Printf("检测到文件变化: %s", fileList)
-		m.handleFileChange(fileList)
-		return
-	}
-
-	// 检查图片
+	// 1. 优先检查图片（避免文本读取干扰，调整顺序）
 	isImage, imageID, err := m.processor.CheckImage()
 	if err == nil && isImage && imageID != m.lastImageID {
 		log.Printf("检测到图片变化，ID: %s", imageID)
@@ -133,7 +121,22 @@ func (m *Monitor) checkClipboard() {
 		return
 	}
 
-	// 检查文本（排除文件情况）
+	// 2. 用统一库读取文本（替换 atotto/clipboard）
+	textData := clipboard.Read(clipboard.FmtText) // 读取文本格式数据
+	text := string(textData)                      // 转为字符串
+	if len(textData) == 0 {
+		// 无文本数据，直接返回（避免空文本判断）
+		return
+	}
+
+	// 3. 后续文件检查、文本处理逻辑保持不变
+	isFile, fileList := m.checkFilePaths(text)
+	if isFile && fileList != m.lastFileList {
+		log.Printf("检测到文件变化: %s", fileList)
+		m.handleFileChange(fileList)
+		return
+	}
+
 	if text != "" && text != m.lastText && !isFile {
 		log.Printf("检测到文本变化: %s", text)
 		m.handleTextChange(text)
@@ -219,13 +222,25 @@ func (m *Monitor) handleTextChange(text string) {
 
 // handleImageChange 处理图片内容变化
 func (m *Monitor) handleImageChange(imageID string) {
-	m.lastImageID = imageID
-	imagePath, err := m.processor.SaveImage()
-	if err != nil {
-		fmt.Printf("保存图片失败: %v\n", err)
+	// 1. 先判断是否为已处理的图片（避免重复触发）
+	if imageID == m.lastImageID {
+		log.Printf("忽略已处理的图片ID: %s", imageID)
 		return
 	}
 
+	// 2. 标记为“处理中”，避免并发重复处理
+	m.lastImageID = imageID
+
+	// 3. 保存图片到本地
+	imagePath, err := m.processor.SaveImage()
+	if err != nil {
+		fmt.Printf("保存图片失败: %v\n", err)
+		// 保存失败时重置lastImageID，允许下次重试
+		m.lastImageID = ""
+		return
+	}
+
+	// 4. 保存图片记录到存储
 	item := model.NewClipboardItem(model.TypeImage, "图片内容", imagePath)
 	items, err := m.storage.AddItem(item)
 	if err != nil {
@@ -233,8 +248,14 @@ func (m *Monitor) handleImageChange(imageID string) {
 		return
 	}
 
+	// 5. 关键修复：保存成功后，清空剪贴板图片数据（避免下次重复检测）
+	// 注意：仅清空图片格式，不影响文本/文件内容
+	clipboard.Write(clipboard.FmtImage, []byte{})
+
+	// 6. 发送变化通知
 	select {
 	case m.changeChan <- items:
+		log.Printf("图片 %s 处理完成，已清空剪贴板图片数据", imageID)
 	default:
 		fmt.Println("通知通道已满，丢弃图片更新")
 	}

@@ -6,7 +6,6 @@ toolchain go1.24.6
 
 require (
 	fyne.io/fyne/v2 v2.6.3
-	github.com/atotto/clipboard v0.1.4
 	github.com/google/uuid v1.6.0
 	github.com/skratchdot/open-golang v0.0.0-20200116055534-eef842397966
 	golang.design/x/clipboard v0.7.1

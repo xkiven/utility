@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"github.com/google/uuid"
 	"github.com/skratchdot/open-golang/open"
 	"golang.design/x/clipboard"
 	"image"
@@ -11,6 +12,7 @@ import (
 	"image/gif"
 	"image/jpeg"
 	"image/png"
+	"log"
 	"os"
 	"path/filepath"
 	"time"
@@ -67,31 +69,35 @@ func (p *Processor) CheckImage() (bool, string, error) {
 
 // SaveImage 保存剪贴板中的图片到文件
 func (p *Processor) SaveImage() (string, error) {
-	// 读取剪贴板图片数据
+	// 读取剪贴板图片数据（原有逻辑不变）
 	data := clipboard.Read(clipboard.FmtImage)
 	if len(data) == 0 {
 		return "", ErrNoImageData
 	}
 
-	// 解码图片获取格式信息
 	img, format, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
 		return "", fmt.Errorf("图片解码失败: %w", err)
 	}
 
-	// 生成唯一文件名
+	// 生成文件名（原有逻辑不变）
 	timestamp := time.Now().Format("20060102150405")
 	filename := fmt.Sprintf("clip_%s.%s", timestamp, format)
-	filePath := filepath.Join(p.imagePath, filename)
+	// 生成绝对路径（核心修改）
+	absImageDir, err := filepath.Abs(p.imagePath)
+	if err != nil {
+		return "", fmt.Errorf("获取图片目录绝对路径失败: %w", err)
+	}
+	filePath := filepath.Join(absImageDir, filename) // 用绝对路径拼接
 
-	// 创建文件并写入图片数据
+	// 创建文件并写入（原有逻辑不变）
 	file, err := os.Create(filePath)
 	if err != nil {
 		return "", fmt.Errorf("创建文件失败: %w", err)
 	}
 	defer file.Close()
 
-	// 根据图片格式编码并保存
+	// 编码保存（原有逻辑不变）
 	switch format {
 	case "png":
 		if err := png.Encode(file, img); err != nil {
@@ -110,24 +116,52 @@ func (p *Processor) SaveImage() (string, error) {
 		return "", ErrUnsupportedImg
 	}
 
-	return filePath, nil
+	// 验证文件是否成功创建（新增）
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		return "", fmt.Errorf("图片保存后文件不存在: %s", filePath)
+	}
+
+	log.Printf("图片已保存为绝对路径: %s", filePath) // 新增日志，便于调试
+	return filePath, nil                   // 返回绝对路径
 }
 
 // SetImageToClipboard 将图片文件设置到剪贴板
 func (p *Processor) SetImageToClipboard(imagePath string) error {
-	// 检查文件是否存在
-	if _, err := os.Stat(imagePath); os.IsNotExist(err) {
-		return ErrFileNotFound
+	// 1. 检查文件是否存在（原有逻辑增强）
+	fileInfo, err := os.Stat(imagePath)
+	if os.IsNotExist(err) {
+		return fmt.Errorf("%w: %s", ErrFileNotFound, imagePath)
+	}
+	if err != nil {
+		return fmt.Errorf("获取图片文件信息失败: %w", err)
+	}
+	// 新增：检查是否为文件（排除目录）
+	if fileInfo.IsDir() {
+		return fmt.Errorf("图片路径是目录，不是文件: %s", imagePath)
+	}
+	// 新增：检查文件大小（避免空文件）
+	if fileInfo.Size() == 0 {
+		return fmt.Errorf("图片文件为空: %s", imagePath)
 	}
 
-	// 读取图片文件
+	// 2. 读取图片文件（新增超时和错误详情）
 	data, err := os.ReadFile(imagePath)
 	if err != nil {
-		return fmt.Errorf("读取图片失败: %w", err)
+		return fmt.Errorf("读取图片失败（路径：%s）: %w", imagePath, err)
+	}
+	if len(data) == 0 {
+		return fmt.Errorf("读取的图片数据为空（路径：%s）", imagePath)
 	}
 
-	// 将图片数据写入剪贴板
+	// 3. 写入剪贴板（新增验证）
 	clipboard.Write(clipboard.FmtImage, data)
+	// 验证：立即读取剪贴板，确认数据是否写入成功
+	writtenData := clipboard.Read(clipboard.FmtImage)
+	if len(writtenData) == 0 || len(writtenData) != len(data) {
+		return fmt.Errorf("图片写入剪贴板失败（写入大小：%d，读取大小：%d）", len(data), len(writtenData))
+	}
+
+	log.Printf("图片成功写入剪贴板（路径：%s，大小：%d KB）", imagePath, len(data)/1024)
 	return nil
 }
 
@@ -142,9 +176,9 @@ func (p *Processor) OpenImage(imagePath string) error {
 
 // 生成图片唯一标识
 func (p *Processor) imageID(width, height, size int) string {
-	return fmt.Sprintf("%s_%dx%d_%d",
-		time.Now().Format("20060102150405"),
-		width, height, size)
+	id := uuid.New().String()
+	log.Printf("生成id：%s", id)
+	return id
 }
 
 // 编码GIF图片（使用标准库自动处理调色板）

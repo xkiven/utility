@@ -53,17 +53,17 @@ func NewHistoryList(
 	list.OnSelected = func(i widget.ListItemID) {
 		if i >= 0 && i < len(list.items) && list.onSelect != nil {
 			selectedItem := list.items[i]
-			list.onSelect(selectedItem)
-			// 取消选中状态
-			fyne.Do(func() {
-				// 1. 取消列表项选中状态
-				list.Unselect(i)
-				// 2. 清除画布焦点（彻底移除选中高亮）
-				if canvas := fyne.CurrentApp().Driver().CanvasForObject(list); canvas != nil {
-					canvas.Focus(nil)
-				}
-				// 3. 强制刷新列表项（确保高亮样式立即更新）
-				list.RefreshItem(i)
+			list.onSelect(selectedItem) // 先触发复制逻辑
+			// 延迟100ms清除焦点（核心修改：避免打断剪贴板写入）
+			time.AfterFunc(100*time.Millisecond, func() {
+				fyne.Do(func() {
+					list.Unselect(i) // 取消选中状态
+					// 清除画布焦点
+					if canvas := fyne.CurrentApp().Driver().CanvasForObject(list); canvas != nil {
+						canvas.Focus(nil)
+					}
+					list.RefreshItem(i) // 刷新列表项
+				})
 			})
 		}
 	}
