@@ -209,10 +209,26 @@ func (w *Window) UpdateHistory(items []*model.ClipboardItem) {
 
 	log.Printf("开始更新历史记录，原始数据量: %d，搜索关键词: %s", len(items), currentSearch)
 
+	// 1. 去重逻辑（保留不变）
+	uniqueItems := make(map[string]*model.ClipboardItem)
+	for _, item := range items {
+		if item.ID == "" {
+			continue
+		}
+		if existing, ok := uniqueItems[item.ID]; !ok || item.Timestamp.After(existing.Timestamp) {
+			uniqueItems[item.ID] = item
+		}
+	}
+	deduplicated := make([]*model.ClipboardItem, 0, len(uniqueItems))
+	for _, item := range uniqueItems {
+		deduplicated = append(deduplicated, item)
+	}
+	log.Printf("去重后数据量: %d", len(deduplicated))
+
+	// 2. 搜索逻辑（保留不变）
 	if currentSearch != "" {
-		// 执行搜索过滤
 		keyword := strings.ToLower(currentSearch)
-		for _, item := range items {
+		for _, item := range deduplicated {
 			if strings.Contains(strings.ToLower(item.Content), keyword) ||
 				(item.Type == model.TypeImage && strings.Contains(keyword, "图片")) ||
 				(item.Type == model.TypeFile && strings.Contains(keyword, "文件")) {
@@ -221,26 +237,22 @@ func (w *Window) UpdateHistory(items []*model.ClipboardItem) {
 		}
 		log.Printf("搜索完成，匹配结果: %d 条", len(results))
 	} else {
-		results = items
-		log.Printf("无搜索关键词，使用全部数据: %d 条", len(results))
+		results = deduplicated
+		log.Printf("无搜索关键词，使用去重后数据: %d 条", len(results))
 	}
 
-	// 正确分离并更新两个列表
+	// 3. 分离列表数据（保留不变）
 	favResults, normalResults := splitItemsByFavorite(results)
 	log.Printf("分离收藏项: %d 条，普通项: %d 条", len(favResults), len(normalResults))
 
-	// 强制刷新两个列表的全部内容
+	// 关键修复：原子化更新两个列表，避免中间状态
 	fyne.Do(func() {
-		// 先清空再添加，确保完全刷新
-		w.historyList.UpdateItems([]*model.ClipboardItem{})
-		w.favoriteList.UpdateItems([]*model.ClipboardItem{})
-
+		// 直接加载新数据（无需先清空，UpdateItems 内部已深拷贝并刷新）
 		w.historyList.UpdateItems(normalResults)
 		w.favoriteList.UpdateItems(favResults)
 
-		// 刷新整个内容区域
+		// 仅刷新标签页容器（避免冗余刷新）
 		w.contentTabs.Refresh()
-		w.Content().Refresh()
-		log.Println("UI列表已刷新")
+		log.Println("UI列表已原子化刷新")
 	})
 }

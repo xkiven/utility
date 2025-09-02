@@ -68,7 +68,7 @@ func NewHistoryList(
 // UpdateItems 更新列表项
 func (l *HistoryList) UpdateItems(items []*model.ClipboardItem) {
 	log.Printf("更新列表项，接收数据量: %d", len(items))
-	// 深度拷贝数据，避免引用旧数据
+	// 深拷贝新数据（双重保险，避免外部引用影响）
 	newItems := make([]*model.ClipboardItem, 0, len(items))
 	for _, item := range items {
 		newItem := &model.ClipboardItem{
@@ -82,12 +82,19 @@ func (l *HistoryList) UpdateItems(items []*model.ClipboardItem) {
 		newItems = append(newItems, newItem)
 	}
 
-	// 切换到主线程刷新UI
+	// 切换到主线程刷新UI（修改后：先清空再加载）
 	fyne.Do(func() {
-		l.items = newItems                            // 先更新数据
-		l.Length = func() int { return len(l.items) } // 再更新长度计算
-		l.Refresh()                                   // 刷新列表
-		l.UnselectAll()                               // 取消选中状态
+		// 步骤1：先清空旧数据和UI
+		l.items = []*model.ClipboardItem{}
+		l.Length = func() int { return 0 }
+		l.Refresh() // 强制销毁旧UI项
+
+		// 步骤2：再加载新数据
+		l.items = newItems
+		l.Length = func() int { return len(l.items) }
+		l.Refresh() // 渲染新UI项
+
+		l.UnselectAll()
 		log.Printf("列表UI已更新，显示数量: %d", len(l.items))
 	})
 }
@@ -141,17 +148,24 @@ func (l *HistoryList) updateItemWidget(i int, o fyne.CanvasObject) {
 
 	item := l.items[i]
 	box := o.(*fyne.Container)
-
-	// 确定 itemContainer 位置（移除未使用的 separator 变量）
 	var itemContainer *fyne.Container
 
-	// 检查第一个对象的类型
-	if _, isRect := box.Objects[0].(*canvas.Rectangle); isRect {
-		// 有背景矩形的情况
-		itemContainer = box.Objects[1].(*fyne.Container)
-	} else {
-		// 没有背景矩形的情况
-		itemContainer = box.Objects[0].(*fyne.Container)
+	// 正确逻辑：遍历找到内容容器（忽略背景矩形和分隔线）
+	for _, obj := range box.Objects {
+		// 内容容器是 VBox（包含 mainContent 和 buttons），排除 canvas 类型（背景/分隔线）
+		if container, ok := obj.(*fyne.Container); ok && container.Layout != nil {
+			// 进一步验证：内容容器的子项包含 mainContent（VBox）和 buttons（HBox）
+			if len(container.Objects) == 2 {
+				itemContainer = container
+				break
+			}
+		}
+	}
+
+	// 防御：若未找到内容容器，直接返回（避免 panic）
+	if itemContainer == nil {
+		log.Printf("警告：未找到索引 %d 的内容容器，跳过更新", i)
+		return
 	}
 
 	mainContent := itemContainer.Objects[0].(*fyne.Container)

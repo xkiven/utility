@@ -189,12 +189,23 @@ func (m *Monitor) checkFilePaths(text string) (bool, string) {
 
 // handleTextChange 处理文本内容变化
 func (m *Monitor) handleTextChange(text string) {
-	m.lastText = text
 	item := model.NewClipboardItem(model.TypeText, text, "")
 	items, err := m.storage.AddItem(item)
 	if err != nil {
 		fmt.Printf("保存文本失败: %v\n", err)
 		return
+	}
+
+	// 从存储层返回的items中获取最新的文本（可能是更新后的旧项）
+	// 避免监控层的lastText与存储层不同步
+	if len(items) > 0 {
+		// 找到最新的文本项（按时间降序，第一个是最新）
+		for _, i := range items {
+			if i.Type == model.TypeText && i.Content == text {
+				m.lastText = i.Content // 同步为存储层的最新值
+				break
+			}
+		}
 	}
 
 	select {
