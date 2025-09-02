@@ -3,6 +3,7 @@ package component
 import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/widget"
+	"log"
 )
 
 // SearchBar 搜索框组件
@@ -19,7 +20,10 @@ func NewSearchBar(onSearch func(string)) *SearchBar {
 	}
 
 	search.SetPlaceHolder("搜索剪贴板历史...")
-	search.OnChanged = search.handleSearch
+	search.OnChanged = func(text string) {
+		log.Printf("搜索关键词变更: %s，触发重建", text)
+		search.onSearch(text) // 回调由windows.go的rebuildFullUI实现
+	}
 
 	return search
 }

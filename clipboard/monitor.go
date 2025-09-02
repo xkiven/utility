@@ -196,22 +196,24 @@ func (m *Monitor) handleTextChange(text string) {
 		return
 	}
 
-	// 从存储层返回的items中获取最新的文本（可能是更新后的旧项）
-	// 避免监控层的lastText与存储层不同步
+	// 同步存储层最新值（保持原逻辑）
 	if len(items) > 0 {
-		// 找到最新的文本项（按时间降序，第一个是最新）
 		for _, i := range items {
 			if i.Type == model.TypeText && i.Content == text {
-				m.lastText = i.Content // 同步为存储层的最新值
+				m.lastText = i.Content
 				break
 			}
 		}
 	}
 
+	// 通知应用层触发全量重建（忽略通道满的情况，确保重建优先级）
 	select {
 	case m.changeChan <- items:
+		log.Println("监控层：文本变化通知已发送（触发重建）")
 	default:
-		fmt.Println("通知通道已满，丢弃文本更新")
+		log.Println("监控层：通知通道已满，强制重试发送（确保重建）")
+		// 通道满时阻塞发送，避免丢失更新（核心修改）
+		m.changeChan <- items
 	}
 }
 

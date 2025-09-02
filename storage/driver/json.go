@@ -183,7 +183,6 @@ func (s *JSONStorage) ToggleFavorite(id string) ([]*model.ClipboardItem, error) 
 		}
 	}
 
-	// 确保找到了要更新的项
 	if !found {
 		log.Printf("未找到要切换收藏状态的项，ID: %s", id)
 		return nil, fmt.Errorf("未找到ID为 %s 的项", id)
@@ -194,12 +193,14 @@ func (s *JSONStorage) ToggleFavorite(id string) ([]*model.ClipboardItem, error) 
 		return nil, err
 	}
 
-	// 重新排序 - 先按收藏状态，再按时间
+	// 排序优化：先按收藏状态（收藏在前），再按时间（最新在前）
 	sort.Slice(items, func(i, j int) bool {
+		if items[i].IsFavorite != items[j].IsFavorite {
+			return items[i].IsFavorite
+		}
 		return items[i].Timestamp.After(items[j].Timestamp)
 	})
 
-	// 直接返回排序后的结果，而不是重新加载
 	return items, nil
 }
 

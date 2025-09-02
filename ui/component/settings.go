@@ -38,7 +38,7 @@ func NewSettingsPanel(window fyne.Window, cfg *config.StorageConfig, saveCallbac
 	// 初始化存储类型选择器
 	p.storageType = widget.NewSelect(
 		[]string{string(config.StorageTypeJSON), string(config.StorageTypeMySQL)},
-		nil, // 先不设置回调，后面再设置
+		nil,
 	)
 
 	// 初始化最大项目数输入框
@@ -106,7 +106,7 @@ func NewSettingsPanel(window fyne.Window, cfg *config.StorageConfig, saveCallbac
 		container.NewHBox(widget.NewLabel("数据库:"), mysqlDBEntry),
 	)
 
-	// 设置保存按钮
+	// 设置保存按钮（回调由windows.go实现重建）
 	p.saveBtn = widget.NewButton("保存设置", func() {
 		// 解析最大项目数
 		maxItems, err := strconv.Atoi(p.maxItemsEntry.Text)
@@ -123,13 +123,11 @@ func NewSettingsPanel(window fyne.Window, cfg *config.StorageConfig, saveCallbac
 		// 验证并处理JSON路径
 		jsonPath := p.jsonPathEntry.Text
 		if p.customPathCheck.Checked && jsonPath != "" {
-			// 确保目录存在
 			if err := os.MkdirAll(jsonPath, 0755); err != nil {
 				dialog.ShowError(errors.New("无法创建JSON存储目录: "+err.Error()), p.window)
 				return
 			}
 		} else if !p.customPathCheck.Checked {
-			// 使用默认路径
 			appDataDir, _ := os.UserConfigDir()
 			jsonPath = filepath.Join(appDataDir, "clipboard-manager", "history")
 			os.MkdirAll(jsonPath, 0755)
@@ -150,23 +148,21 @@ func NewSettingsPanel(window fyne.Window, cfg *config.StorageConfig, saveCallbac
 			MaxItems: maxItems,
 		}
 
-		// 调用回调保存配置
+		// 调用回调（由windows.go触发重建）
 		if p.saveCallback != nil {
 			p.saveCallback(newCfg)
 		}
 
-		// 显示保存成功提示
-		dialog.ShowInformation("设置已保存", "您的设置已成功保存", p.window)
+		dialog.ShowInformation("设置已保存", "您的设置已成功保存（已触发UI重建）", p.window)
 	})
 
-	// 设置存储类型变更回调（在所有控件初始化完成后）
+	// 设置存储类型变更回调
 	p.storageType.OnChanged = func(value string) {
 		p.updateStorageSettingsVisibility(value)
 	}
 
 	// 设置初始选中值
 	p.storageType.SetSelected(string(cfg.Type))
-	// 确保初始显示正确的设置面板
 	p.updateStorageSettingsVisibility(string(cfg.Type))
 
 	// 构建主容器
@@ -178,7 +174,6 @@ func NewSettingsPanel(window fyne.Window, cfg *config.StorageConfig, saveCallbac
 		p.maxItemsEntry,
 		widget.NewSeparator(),
 		widget.NewLabel("存储设置:"),
-		// 这里将根据存储类型显示不同的设置面板
 		container.NewVBox(p.jsonSettings, p.mysqlSettings),
 		layout.NewSpacer(),
 		p.saveBtn,
@@ -190,7 +185,7 @@ func NewSettingsPanel(window fyne.Window, cfg *config.StorageConfig, saveCallbac
 // updateStorageSettingsVisibility 根据存储类型更新设置面板可见性
 func (p *SettingsPanel) updateStorageSettingsVisibility(storageType string) {
 	if p.jsonSettings == nil || p.mysqlSettings == nil {
-		return // 防止未初始化时调用
+		return
 	}
 
 	if storageType == string(config.StorageTypeJSON) {
