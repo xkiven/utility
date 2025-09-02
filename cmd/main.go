@@ -2,13 +2,14 @@ package main
 
 import (
 	"clipboard/app"
+	"fmt"
 )
 
 func main() {
 	// 创建应用
 	application, err := app.New()
 	if err != nil {
-		//fmt.Printf("创建应用失败: %v\n", err)
+		fmt.Printf("创建应用失败: %v\n", err)
 		return
 	}
 

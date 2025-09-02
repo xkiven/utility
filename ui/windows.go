@@ -11,6 +11,7 @@ import (
 	"log"
 	"sort"
 	"strings"
+	"time"
 )
 
 // Window 应用主窗口
@@ -105,19 +106,20 @@ func (w *Window) initUI() {
 			updatedItems, err := w.storage.DeleteItem(id)
 			if err == nil {
 				fav, normal := splitItemsByFavorite(updatedItems)
-
-				// 强制刷新两个列表，确保删除后UI一致
-				w.favoriteList.UpdateItems(fav)
 				w.historyList.UpdateItems(normal)
 
-				// 修复空收藏列表提示（仅在收藏列表为空时显示）
+				// 处理空收藏列表提示（修复后）
 				if len(fav) == 0 {
+					// 添加非交互的提示项（ID含特殊标识，避免与真实项冲突）
 					w.favoriteList.UpdateItems([]*model.ClipboardItem{{
-						ID:         "empty-favorite",
+						ID:         "empty-favorite-placeholder", // 明确占位符ID
 						Type:       model.TypeText,
 						Content:    "暂无收藏内容",
 						IsFavorite: false,
+						Timestamp:  time.Time{}, // 空时间避免排序干扰
 					}})
+				} else {
+					w.favoriteList.UpdateItems(fav) // 有数据时正常显示
 				}
 			} else {
 				log.Printf("删除失败: %v", err)

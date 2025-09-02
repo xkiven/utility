@@ -68,10 +68,9 @@ func NewHistoryList(
 // UpdateItems 更新列表项
 func (l *HistoryList) UpdateItems(items []*model.ClipboardItem) {
 	log.Printf("更新列表项，接收数据量: %d", len(items))
-	// 关键修改：创建全新的切片，避免引用旧数据
+	// 深度拷贝数据，避免引用旧数据
 	newItems := make([]*model.ClipboardItem, 0, len(items))
 	for _, item := range items {
-		// 深度拷贝每个项，确保数据完全隔离
 		newItem := &model.ClipboardItem{
 			ID:         item.ID,
 			Type:       item.Type,
@@ -82,14 +81,13 @@ func (l *HistoryList) UpdateItems(items []*model.ClipboardItem) {
 		}
 		newItems = append(newItems, newItem)
 	}
-	l.items = newItems
 
-	// 强制UI完全重建列表
+	// 切换到主线程刷新UI
 	fyne.Do(func() {
-		l.items = newItems
-		l.Refresh()
-		l.UnselectAll()
-		l.Length = func() int { return len(l.items) }
+		l.items = newItems                            // 先更新数据
+		l.Length = func() int { return len(l.items) } // 再更新长度计算
+		l.Refresh()                                   // 刷新列表
+		l.UnselectAll()                               // 取消选中状态
 		log.Printf("列表UI已更新，显示数量: %d", len(l.items))
 	})
 }
@@ -172,14 +170,18 @@ func (l *HistoryList) updateItemWidget(i int, o fyne.CanvasObject) {
 	switch item.Type {
 	case model.TypeText:
 		content := item.Content
-		if len(content) > 100 {
-			content = content[:100] + "..."
+		if len(content) > 15 {
+			content = content[:15] + "..."
 		}
 		contentText = content
 	case model.TypeImage:
 		contentText = "[图片内容] " + filepath.Base(item.ImagePath) // 显示图片文件名
 	case model.TypeFile:
-		contentText = "[文件] " + item.Content
+		content := item.Content
+		if len(content) > 15 {
+			content = content[:15] + "..."
+		}
+		contentText = "[文件] " + content
 	}
 
 	// 准备时间文本

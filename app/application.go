@@ -7,6 +7,7 @@ import (
 	"clipboard/ui"
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
+	"log"
 )
 
 // Application 应用程序核心
@@ -66,16 +67,28 @@ func (a *Application) Run() {
 
 // 设置剪贴板监听器
 func (a *Application) setupClipboardListener() {
-	// 开始监听剪贴板
-	a.monitor.Start()
+	// 先启动剪贴板监控（原代码中可能遗漏，需确认补充，避免监控未运行）
+	if err := a.monitor.Start(); err != nil {
+		log.Printf("启动剪贴板监控失败: %v", err)
+		return
+	}
 
-	// 处理剪贴板变化
+	// 启动协程监听剪贴板变化通知
 	go func() {
-		for items := range a.monitor.ChangeChan() {
-			// 新内容复制后，强制更新整个列表
-			fyne.Do(func() {
-				a.window.UpdateHistory(items)
-			})
+		for {
+			select {
+			// 接收存储更新后的所有项
+			case items := <-a.monitor.ChangeChan():
+
+				fyne.Do(func() {
+					a.window.UpdateHistory(items)
+					log.Printf("应用层触发UI更新，新数据量：%d", len(items))
+				})
+			// 增加退出case，避免协程泄露
+			case <-a.monitor.StopChan:
+				log.Println("剪贴板监听协程退出")
+				return
+			}
 		}
 	}()
 }

@@ -17,7 +17,7 @@ import (
 type Monitor struct {
 	storage      storage.Storage             // 存储接口
 	processor    *Processor                  // 内容处理器（图片等复杂内容）
-	stopChan     chan struct{}               // 停止信号通道
+	StopChan     chan struct{}               // 停止信号通道
 	changeChan   chan []*model.ClipboardItem // 变化通知通道
 	lastText     string                      // 上次文本内容
 	lastImageID  string                      // 上次图片ID
@@ -35,7 +35,7 @@ func NewMonitor(s storage.Storage) (*Monitor, error) {
 	return &Monitor{
 		storage:    s,
 		processor:  processor,
-		stopChan:   make(chan struct{}),
+		StopChan:   make(chan struct{}),
 		changeChan: make(chan []*model.ClipboardItem, 10),
 	}, nil
 }
@@ -54,7 +54,7 @@ func (m *Monitor) Start() error {
 
 		for {
 			select {
-			case <-m.stopChan:
+			case <-m.StopChan:
 				return
 			default:
 				m.checkClipboard()
@@ -72,7 +72,7 @@ func (m *Monitor) Stop() {
 		return
 	}
 
-	close(m.stopChan)
+	close(m.StopChan)
 	time.Sleep(100 * time.Millisecond)
 }
 
