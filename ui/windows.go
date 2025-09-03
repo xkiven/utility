@@ -26,12 +26,25 @@ type Window struct {
 	favoriteList   *component.HistoryList // 新增收藏列表字段
 }
 
+func (w *Window) performSearch(keyword string) {
+	items, err := w.storage.Search(keyword)
+	if err != nil {
+		log.Printf("搜索失败: %v", err)
+		items = []*model.ClipboardItem{}
+	}
+
+	favorites, normal := splitItemsByFavorite(items)
+
+	w.historyList.UpdateItems(normal)
+	w.favoriteList.UpdateItems(favorites)
+}
+
 // ClipboardSetter 剪贴板设置接口
 type ClipboardSetter interface {
 	SetContent(item *model.ClipboardItem) error
 }
 
-// NewWindow 创建主窗口（初始化逻辑不变）
+// NewWindow 创建主窗口
 func NewWindow(
 	app fyne.App,
 	storage storage.Storage,
@@ -49,22 +62,22 @@ func NewWindow(
 		onSaveSettings: onSaveSettings,
 	}
 
-	// 初始化UI（首次创建）
+	// 初始化UI
 	w.rebuildFullUI()
 
 	return w
 }
 
-// 核心修改：全量重建UI（销毁旧实例+重建新实例）
+// 全量重建UI
 func (w *Window) rebuildFullUI() {
-	// 1. 销毁旧UI引用（解除内存关联）
+	// 1. 销毁旧UI引用
 	w.historyList = nil
 	w.favoriteList = nil
 	w.searchBar = nil
 	w.settingsPanel = nil
 	w.contentTabs = nil
 
-	// 2. 重新加载最新数据（模拟重启时的数据初始化）
+	// 2. 重新加载最新数据
 	items, err := w.storage.LoadItems()
 	if err != nil {
 		log.Printf("重建UI加载数据失败: %v", err)
@@ -83,14 +96,11 @@ func (w *Window) rebuildFullUI() {
 	}
 
 	// 4. 重建搜索框（新实例）
-	currentSearch := ""
-	if w.searchBar != nil {
-		currentSearch = w.searchBar.Text
+	if w.searchBar == nil {
+		w.searchBar = component.NewSearchBar(func(text string) {
+			w.performSearch(text)
+		})
 	}
-	w.searchBar = component.NewSearchBar(func(text string) {
-		w.UpdateHistory(nil)
-	})
-	w.searchBar.SetText(currentSearch)
 
 	// 新增：主动将焦点设置到搜索框
 	//fyne.Do(func() {
@@ -158,18 +168,18 @@ func (w *Window) rebuildFullUI() {
 	)
 
 	// 9. 重建设置面板（新实例+重新加载配置）
-	cfg, _ := config.Load()
-	w.settingsPanel = component.NewSettingsPanel(w.Window, &cfg.Storage, func(newCfg *config.StorageConfig) {
-		// 设置保存后触发全量重建
-		w.onSaveSettings(newCfg)
-		w.rebuildFullUI()
-	})
+	//if w.settingsPanel == nil {
+	//	cfg, _ := config.Load()
+	//	w.settingsPanel = component.NewSettingsPanel(w.Window, &cfg.Storage, func(newCfg *config.StorageConfig) {
+	//		w.onSaveSettings(newCfg)
+	//	})
+	//}
 
 	// 10. 重建标签页（新容器）
 	w.contentTabs = container.NewAppTabs(
 		container.NewTabItemWithIcon("历史记录", theme.HistoryIcon(), historyContent),
 		container.NewTabItemWithIcon("我的收藏", theme.ConfirmIcon(), favoriteContent),
-		container.NewTabItemWithIcon("设置", theme.SettingsIcon(), w.settingsPanel),
+		//container.NewTabItemWithIcon("设置", theme.SettingsIcon(), w.settingsPanel),
 	)
 
 	// 11. 重新设置主内容（销毁旧UI树）
@@ -192,10 +202,10 @@ func splitItemsByFavorite(items []*model.ClipboardItem) (favorites, normal []*mo
 	return
 }
 
-// UpdateHistory 更新历史记录（改为触发全量重建）
+// UpdateHistory 更新历史记录
 func (w *Window) UpdateHistory(_ []*model.ClipboardItem) {
 	log.Println("收到数据更新通知，触发UI全量重建")
-	// 直接调用全量重建（忽略入参，重新从存储层加载最新数据）
+	// 直接调用全量重建
 	fyne.Do(func() {
 		w.rebuildFullUI()
 	})

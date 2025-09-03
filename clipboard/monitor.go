@@ -8,8 +8,6 @@ import (
 	"fmt"
 	"golang.design/x/clipboard"
 	"image"
-	"image/jpeg"
-	"image/png"
 	"log"
 	"os"
 	"path/filepath"
@@ -157,7 +155,7 @@ func (m *Monitor) checkClipboard() {
 		m.isManualWrite = false
 	}
 
-	// 1. 优先检查图片（避免文本读取干扰，调整顺序）
+	// 优先检查图片
 	isImage, imageID, err := m.processor.CheckImage()
 	if err == nil && isImage && imageID != m.lastImageID {
 		log.Printf("检测到图片变化，ID: %s", imageID)
@@ -165,7 +163,6 @@ func (m *Monitor) checkClipboard() {
 		return
 	}
 
-	// 2. 用统一库读取文本（替换 atotto/clipboard）
 	textData := clipboard.Read(clipboard.FmtText) // 读取文本格式数据
 	text := string(textData)                      // 转为字符串
 	if len(textData) == 0 {
@@ -173,7 +170,7 @@ func (m *Monitor) checkClipboard() {
 		return
 	}
 
-	// 3. 后续文件检查、文本处理逻辑保持不变
+	//  后续文件检查、文本处理逻辑保持不变
 	isFile, fileList := m.checkFilePaths(text)
 	if isFile && fileList != m.lastFileList {
 		log.Printf("检测到文件变化: %s", fileList)
@@ -341,56 +338,33 @@ func isFileOrDirExists(path string) bool {
 }
 
 func (p *Processor) SaveImageWithData(imageData []byte) (string, error) {
+	log.Printf("新版 SaveImageWithData 被调用！len=%d", len(imageData))
+	log.Printf("文件头=%x", imageData[:10])
 	if len(imageData) == 0 {
 		return "", ErrNoImageData
 	}
 
-	// 解码图片（逻辑与原SaveImage一致，仅输入改为传入的data）
-	img, format, err := image.Decode(bytes.NewReader(imageData))
-	if err != nil {
-		return "", fmt.Errorf("图片解码失败: %w", err)
+	//  按文件头判断真实格式
+	ext := "bin"
+	switch {
+	case bytes.HasPrefix(imageData, []byte("GIF87a")), bytes.HasPrefix(imageData, []byte("GIF89a")):
+		ext = "gif"
+	case bytes.HasPrefix(imageData, []byte("\x89PNG")):
+		ext = "png"
+	case bytes.HasPrefix(imageData, []byte("\xFF\xD8\xFF")):
+		ext = "jpg"
 	}
 
-	// 生成绝对路径（复用原逻辑）
-	timestamp := time.Now().Format("20060102150405")
-	filename := fmt.Sprintf("clip_%s.%s", timestamp, format)
-	absImageDir, err := filepath.Abs(p.imagePath)
-	if err != nil {
-		return "", fmt.Errorf("获取图片目录绝对路径失败: %w", err)
-	}
-	filePath := filepath.Join(absImageDir, filename)
+	// 直接写原始字节流，保留动画
+	ts := time.Now().Format("20060102150405")
+	fileName := fmt.Sprintf("clip_%s.%s", ts, ext)
+	absDir, _ := filepath.Abs(p.imagePath)
+	fullPath := filepath.Join(absDir, fileName)
 
-	// 写入文件（复用原逻辑）
-	file, err := os.Create(filePath)
-	if err != nil {
-		return "", fmt.Errorf("创建文件失败: %w", err)
-	}
-	defer file.Close()
-
-	// 编码保存（复用原逻辑）
-	switch format {
-	case "png":
-		if err := png.Encode(file, img); err != nil {
-			return "", fmt.Errorf("PNG编码失败: %w", err)
-		}
-	case "jpeg", "jpg":
-		opts := &jpeg.Options{Quality: 90}
-		if err := jpeg.Encode(file, img, opts); err != nil {
-			return "", fmt.Errorf("JPEG编码失败: %w", err)
-		}
-	case "gif":
-		if err := p.encodeGIF(file, img); err != nil {
-			return "", fmt.Errorf("GIF编码失败: %w", err)
-		}
-	default:
-		return "", ErrUnsupportedImg
+	if err := os.WriteFile(fullPath, imageData, 0644); err != nil {
+		return "", fmt.Errorf("保存 %s 失败: %w", ext, err)
 	}
 
-	// 验证文件存在（复用原逻辑）
-	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		return "", fmt.Errorf("图片保存后文件不存在: %s", filePath)
-	}
-
-	log.Printf("图片已保存为绝对路径: %s", filePath)
-	return filePath, nil
+	log.Printf(" 已保存 %s：%s", strings.ToUpper(ext), fullPath)
+	return fullPath, nil
 }

@@ -72,8 +72,9 @@ func NewHistoryList(
 }
 
 // UpdateItems 禁用增量更新，强制通过重建实现刷新
-func (l *HistoryList) UpdateItems(_ []*model.ClipboardItem) {
-	log.Printf("HistoryList.UpdateItems 已禁用，需通过全量重建UI更新（模拟重启）")
+func (l *HistoryList) UpdateItems(items []*model.ClipboardItem) {
+	l.items = items
+	l.Refresh()
 }
 
 // 创建列表项控件（保持原逻辑）
