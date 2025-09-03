@@ -2,9 +2,10 @@ package clipboard
 
 import (
 	"bytes"
+	"crypto/md5"
+	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/google/uuid"
 	"github.com/skratchdot/open-golang/open"
 	"golang.design/x/clipboard"
 	"image"
@@ -63,7 +64,7 @@ func (p *Processor) CheckImage() (bool, string, error) {
 	}
 
 	// 生成图片唯一标识
-	imageID := p.imageID(imgCfg.Width, imgCfg.Height, len(data))
+	imageID := p.imageID(imgCfg.Width, imgCfg.Height, data)
 	return true, imageID, nil
 }
 
@@ -153,15 +154,27 @@ func (p *Processor) SetImageToClipboard(imagePath string) error {
 		return fmt.Errorf("读取的图片数据为空（路径：%s）", imagePath)
 	}
 
-	// 3. 写入剪贴板（新增验证）
+	// 新增：计算原文件的MD5哈希
+	originalHash := md5.Sum(data)
+	originalHashStr := hex.EncodeToString(originalHash[:])
+
+	// 写入剪贴板
 	clipboard.Write(clipboard.FmtImage, data)
-	// 验证：立即读取剪贴板，确认数据是否写入成功
+	time.Sleep(200 * time.Millisecond)
+
+	// 验证：不仅检查长度，还检查内容哈希
 	writtenData := clipboard.Read(clipboard.FmtImage)
 	if len(writtenData) == 0 || len(writtenData) != len(data) {
 		return fmt.Errorf("图片写入剪贴板失败（写入大小：%d，读取大小：%d）", len(data), len(writtenData))
 	}
+	// 新增哈希校验
+	writtenHash := md5.Sum(writtenData)
+	writtenHashStr := hex.EncodeToString(writtenHash[:])
+	if writtenHashStr != originalHashStr {
+		return fmt.Errorf("图片写入剪贴板内容不一致（原哈希：%s，写入哈希：%s）", originalHashStr, writtenHashStr)
+	}
 
-	log.Printf("图片成功写入剪贴板（路径：%s，大小：%d KB）", imagePath, len(data)/1024)
+	log.Printf("图片成功写入剪贴板（路径：%s，大小：%d KB，哈希：%s）", imagePath, len(data)/1024, originalHashStr)
 	return nil
 }
 
@@ -175,9 +188,12 @@ func (p *Processor) OpenImage(imagePath string) error {
 }
 
 // 生成图片唯一标识
-func (p *Processor) imageID(width, height, size int) string {
-	id := uuid.New().String()
-	log.Printf("生成id：%s", id)
+func (p *Processor) imageID(width, height int, data []byte) string {
+	// 1. 计算图片内容的MD5哈希（确保相同内容哈希一致）
+	hash := md5.Sum(data)
+	hashStr := hex.EncodeToString(hash[:])
+	// 2. 组合哈希+尺寸生成唯一ID（不再依赖随机UUID）
+	id := fmt.Sprintf("%s_%d_%d", hashStr, width, height)
 	return id
 }
 

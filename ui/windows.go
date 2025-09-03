@@ -93,11 +93,11 @@ func (w *Window) rebuildFullUI() {
 	w.searchBar.SetText(currentSearch)
 
 	// 新增：主动将焦点设置到搜索框
-	fyne.Do(func() {
-		if canvas := fyne.CurrentApp().Driver().CanvasForObject(w.searchBar); canvas != nil {
-			canvas.Focus(w.searchBar) // 强制让搜索框获取焦点
-		}
-	})
+	//fyne.Do(func() {
+	//	if canvas := fyne.CurrentApp().Driver().CanvasForObject(w.searchBar); canvas != nil {
+	//		canvas.Focus(w.searchBar) // 强制让搜索框获取焦点
+	//	}
+	//})
 	// 5. 重建普通历史列表（新实例+重新绑定回调）
 	w.historyList = component.NewHistoryList(
 		normalItems,
@@ -174,7 +174,7 @@ func (w *Window) rebuildFullUI() {
 
 	// 11. 重新设置主内容（销毁旧UI树）
 	w.SetContent(w.contentTabs)
-	log.Println("UI全量重建完成（模拟重启效果）")
+	log.Println("UI全量重建完成")
 }
 
 // 辅助函数：分离收藏项和普通项

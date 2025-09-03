@@ -1,11 +1,15 @@
 package clipboard
 
 import (
+	"bytes"
 	"clipboard/model"
 	"clipboard/storage"
 	"errors"
 	"fmt"
 	"golang.design/x/clipboard"
+	"image"
+	"image/jpeg"
+	"image/png"
 	"log"
 	"os"
 	"path/filepath"
@@ -15,14 +19,16 @@ import (
 
 // Monitor 剪贴板监听器
 type Monitor struct {
-	storage      storage.Storage             // 存储接口
-	processor    *Processor                  // 内容处理器（图片等复杂内容）
-	StopChan     chan struct{}               // 停止信号通道
-	changeChan   chan []*model.ClipboardItem // 变化通知通道
-	lastText     string                      // 上次文本内容
-	lastImageID  string                      // 上次图片ID
-	lastFileList string                      // 上次文件列表
-	isRunning    bool                        // 运行状态标识
+	storage           storage.Storage             // 存储接口
+	processor         *Processor                  // 内容处理器（图片等复杂内容）
+	StopChan          chan struct{}               // 停止信号通道
+	changeChan        chan []*model.ClipboardItem // 变化通知通道
+	lastText          string                      // 上次文本内容
+	lastImageID       string                      // 上次图片ID
+	lastFileList      string                      // 上次文件列表
+	isRunning         bool                        // 运行状态标识
+	isManualWrite     bool                        // 新增：标记是否为程序手动写入的图片
+	manualWriteExpire time.Time                   // 新增：手动写入标记的过期时间（避免永久屏蔽）
 }
 
 // NewMonitor 创建剪贴板监听器
@@ -91,6 +97,11 @@ func (m *Monitor) SetContent(item *model.ClipboardItem) error {
 	if item == nil {
 		return errors.New("无效的剪贴板项")
 	}
+	log.Println("程序写入剪贴板，开始屏蔽检测")
+
+	// 设置手动写入标记，有效期延长至5秒（覆盖系统延迟）
+	m.isManualWrite = true
+	m.manualWriteExpire = time.Now().Add(5 * time.Second)
 
 	switch item.Type {
 	case model.TypeText:
@@ -100,9 +111,31 @@ func (m *Monitor) SetContent(item *model.ClipboardItem) error {
 		if item.ImagePath == "" {
 			return errors.New("图片路径为空")
 		}
-		// 新增日志：确认传递的图片路径
 		log.Printf("准备复制图片，路径：%s", item.ImagePath)
-		return m.processor.SetImageToClipboard(item.ImagePath) // 确保路径是绝对路径
+
+		// 读取图片文件内容
+		data, err := os.ReadFile(item.ImagePath)
+		if err != nil {
+			return fmt.Errorf("读取图片失败: %w", err)
+		}
+
+		// 计算图片ID
+		img, _, err := image.DecodeConfig(bytes.NewReader(data))
+		if err != nil {
+			return fmt.Errorf("图片解码失败: %w", err)
+		}
+		imageID := m.processor.imageID(img.Width, img.Height, data)
+
+		// 写入剪贴板
+		err = m.processor.SetImageToClipboard(item.ImagePath)
+		if err != nil {
+			return err
+		}
+
+		// 关键：记录当前写入的图片ID，防止重复检测
+		m.lastImageID = imageID
+
+		return nil
 	case model.TypeFile:
 		clipboard.Write(clipboard.FmtText, []byte(item.Content))
 		return nil
@@ -113,6 +146,17 @@ func (m *Monitor) SetContent(item *model.ClipboardItem) error {
 
 // checkClipboard 检查剪贴板变化
 func (m *Monitor) checkClipboard() {
+
+	if m.isManualWrite {
+
+		if time.Now().Before(m.manualWriteExpire) {
+			return
+		}
+		// 标记已过期，强制重置
+		log.Println("手动写入标记已过期，重置标记")
+		m.isManualWrite = false
+	}
+
 	// 1. 优先检查图片（避免文本读取干扰，调整顺序）
 	isImage, imageID, err := m.processor.CheckImage()
 	if err == nil && isImage && imageID != m.lastImageID {
@@ -222,25 +266,27 @@ func (m *Monitor) handleTextChange(text string) {
 
 // handleImageChange 处理图片内容变化
 func (m *Monitor) handleImageChange(imageID string) {
-	// 1. 先判断是否为已处理的图片（避免重复触发）
+	// 如果图片ID与上一次写入的相同，直接忽略
 	if imageID == m.lastImageID {
-		log.Printf("忽略已处理的图片ID: %s", imageID)
+		log.Printf("忽略重复图片ID: %s", imageID)
+		return
+	}
+	log.Printf("处理新图片，ID: %s", imageID)
+
+	// 读取图片数据
+	imageData := clipboard.Read(clipboard.FmtImage)
+	if len(imageData) == 0 {
 		return
 	}
 
-	// 2. 标记为“处理中”，避免并发重复处理
-	m.lastImageID = imageID
-
-	// 3. 保存图片到本地
-	imagePath, err := m.processor.SaveImage()
+	// 保存图片
+	imagePath, err := m.processor.SaveImageWithData(imageData)
 	if err != nil {
 		fmt.Printf("保存图片失败: %v\n", err)
-		// 保存失败时重置lastImageID，允许下次重试
-		m.lastImageID = ""
 		return
 	}
 
-	// 4. 保存图片记录到存储
+	// 保存记录
 	item := model.NewClipboardItem(model.TypeImage, "图片内容", imagePath)
 	items, err := m.storage.AddItem(item)
 	if err != nil {
@@ -248,14 +294,13 @@ func (m *Monitor) handleImageChange(imageID string) {
 		return
 	}
 
-	// 5. 关键修复：保存成功后，清空剪贴板图片数据（避免下次重复检测）
-	// 注意：仅清空图片格式，不影响文本/文件内容
-	clipboard.Write(clipboard.FmtImage, []byte{})
+	// 更新 lastImageID
+	m.lastImageID = imageID
 
-	// 6. 发送变化通知
+	// 通知UI
 	select {
 	case m.changeChan <- items:
-		log.Printf("图片 %s 处理完成，已清空剪贴板图片数据", imageID)
+		log.Printf("新图片 %s 处理完成", imageID)
 	default:
 		fmt.Println("通知通道已满，丢弃图片更新")
 	}
@@ -293,4 +338,59 @@ func isFileOrDirExists(path string) bool {
 	// 检查路径是否存在
 	_, err = os.Stat(absPath)
 	return !os.IsNotExist(err)
+}
+
+func (p *Processor) SaveImageWithData(imageData []byte) (string, error) {
+	if len(imageData) == 0 {
+		return "", ErrNoImageData
+	}
+
+	// 解码图片（逻辑与原SaveImage一致，仅输入改为传入的data）
+	img, format, err := image.Decode(bytes.NewReader(imageData))
+	if err != nil {
+		return "", fmt.Errorf("图片解码失败: %w", err)
+	}
+
+	// 生成绝对路径（复用原逻辑）
+	timestamp := time.Now().Format("20060102150405")
+	filename := fmt.Sprintf("clip_%s.%s", timestamp, format)
+	absImageDir, err := filepath.Abs(p.imagePath)
+	if err != nil {
+		return "", fmt.Errorf("获取图片目录绝对路径失败: %w", err)
+	}
+	filePath := filepath.Join(absImageDir, filename)
+
+	// 写入文件（复用原逻辑）
+	file, err := os.Create(filePath)
+	if err != nil {
+		return "", fmt.Errorf("创建文件失败: %w", err)
+	}
+	defer file.Close()
+
+	// 编码保存（复用原逻辑）
+	switch format {
+	case "png":
+		if err := png.Encode(file, img); err != nil {
+			return "", fmt.Errorf("PNG编码失败: %w", err)
+		}
+	case "jpeg", "jpg":
+		opts := &jpeg.Options{Quality: 90}
+		if err := jpeg.Encode(file, img, opts); err != nil {
+			return "", fmt.Errorf("JPEG编码失败: %w", err)
+		}
+	case "gif":
+		if err := p.encodeGIF(file, img); err != nil {
+			return "", fmt.Errorf("GIF编码失败: %w", err)
+		}
+	default:
+		return "", ErrUnsupportedImg
+	}
+
+	// 验证文件存在（复用原逻辑）
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		return "", fmt.Errorf("图片保存后文件不存在: %s", filePath)
+	}
+
+	log.Printf("图片已保存为绝对路径: %s", filePath)
+	return filePath, nil
 }
